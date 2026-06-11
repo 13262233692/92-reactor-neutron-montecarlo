@@ -221,7 +221,63 @@ def build_reaction_scatter(results, n_sample=10000):
     return traces
 
 
-def create_dashboard(results, traced_results=None, flux_data=None):
+def build_poison_volume_trace(depletion_result):
+    xe135 = depletion_result['xe135_grid']
+    xc = depletion_result['x_centers']
+    yc = depletion_result['y_centers']
+    zc = depletion_result['z_centers']
+    fuel_mask = depletion_result['fuel_mask']
+
+    display = np.zeros_like(xe135)
+    peak = xe135.max()
+    if peak > 0:
+        norm = xe135 / peak
+        display = np.where(fuel_mask & (norm > 0.3), norm, 0)
+
+    X, Y, Z = np.meshgrid(xc, yc, zc, indexing='ij')
+
+    return go.Volume(
+        x=X.flatten(),
+        y=Y.flatten(),
+        z=Z.flatten(),
+        value=display.flatten(),
+        isomin=0.35,
+        isomax=1.0,
+        opacity=0.55,
+        surface_count=12,
+        colorscale='Greys',
+        reversescale=False,
+        colorbar=dict(title='Xe-135 毒化浓度', x=-0.08, len=0.7),
+        caps=dict(x_show=False, y_show=False, z_show=False),
+        name='Xe-135 裂变毒物'
+    )
+
+
+def build_burnup_iso_surface(depletion_result):
+    burnup = depletion_result['burnup_pct']
+    xc = depletion_result['x_centers']
+    yc = depletion_result['y_centers']
+    zc = depletion_result['z_centers']
+    fuel_mask = depletion_result['fuel_mask']
+
+    display = np.where(fuel_mask, burnup, 0)
+    X, Y, Z = np.meshgrid(xc, yc, zc, indexing='ij')
+
+    return go.Volume(
+        x=X.flatten(), y=Y.flatten(), z=Z.flatten(),
+        value=display.flatten(),
+        isomin=2.0,
+        isomax=10.0,
+        opacity=0.08,
+        surface_count=4,
+        colorscale='Electric',
+        colorbar=dict(title='燃耗深度 (%)', x=1.12, len=0.7),
+        caps=dict(x_show=False, y_show=False, z_show=False),
+        name='燃耗 U-235 → Pu-239'
+    )
+
+
+def create_dashboard(results, traced_results=None, flux_data=None, depletion_result=None):
     if flux_data is None:
         from flux_calculator import compute_flux_map
         flux, xc, yc, zc = compute_flux_map(results)
@@ -234,12 +290,18 @@ def create_dashboard(results, traced_results=None, flux_data=None):
         specs=[[dict(type='scene')]],
     )
 
+    if depletion_result is not None:
+        fig.add_trace(build_burnup_iso_surface(depletion_result), row=1, col=1)
+
     fig.add_trace(build_flux_volume_trace(flux, xc, yc, zc), row=1, col=1)
 
     for trace in build_core_outline():
         fig.add_trace(trace, row=1, col=1)
 
     fig.add_trace(build_fuel_rod_scatter(), row=1, col=1)
+
+    if depletion_result is not None:
+        fig.add_trace(build_poison_volume_trace(depletion_result), row=1, col=1)
 
     for trace in build_reaction_scatter(results):
         fig.add_trace(trace, row=1, col=1)
@@ -261,15 +323,23 @@ def create_dashboard(results, traced_results=None, flux_data=None):
     n_leak = results.get('n_leak', np.sum(results['reaction'] == REACTION_LEAK))
     k_eff = (n_fission * 2.43) / n_total if n_total > 0 else 0
 
+    title_parts = [f'中子数: {n_total:,}', f'k-eff ≈ {k_eff:.4f}',
+                   f'裂变: {n_fission:,}', f'吸收: {n_absorb:,}', f'泄漏: {n_leak:,}']
+
+    if depletion_result is not None:
+        days = depletion_result['burnup_days']
+        xe_max = depletion_result['xe135_grid'].max()
+        pu_max = depletion_result['pu239_grid'].max()
+        bu_max = np.nanmax(depletion_result['burnup_pct'])
+        title_parts.insert(0, f'燃耗: {days} 天')
+        title_parts.append(f'Burnup: {bu_max:.1f}%')
+        title_parts.append(f'Xe-135 peak: {xe_max:.2e}')
+        title_parts.append(f'Pu-239 peak: {pu_max:.2e}')
+
     fig.update_layout(
         title=dict(
-            text=f'堆芯三维中子通量实时监控台 | '
-                 f'中子数: {n_total:,} | '
-                 f'k-eff ≈ {k_eff:.4f} | '
-                 f'裂变: {n_fission:,} | '
-                 f'吸收: {n_absorb:,} | '
-                 f'泄漏: {n_leak:,}',
-            font=dict(size=14)
+            text='堆芯三维中子通量 + 燃耗毒物推演监控台 | ' + ' | '.join(title_parts),
+            font=dict(size=12)
         ),
         scene=dict(
             xaxis=dict(title='X (cm)', range=[CORE_X_MIN, CORE_X_MAX],
@@ -289,7 +359,7 @@ def create_dashboard(results, traced_results=None, flux_data=None):
         height=900,
         showlegend=True,
         legend=dict(
-            x=0.01, y=0.99,
+            x=0.01, y=0.02,
             bgcolor='rgba(0,0,0,0.5)',
             font=dict(size=10, color='white')
         )
