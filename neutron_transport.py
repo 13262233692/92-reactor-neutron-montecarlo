@@ -10,7 +10,7 @@ from nuclear_data import (
 from geometry import (
     CORE_X_MIN, CORE_X_MAX, CORE_Y_MIN, CORE_Y_MAX,
     CORE_Z_MIN, CORE_Z_MAX,
-    get_material
+    get_material, source_position_from_index
 )
 
 REACTION_ABSORB = 0
@@ -159,6 +159,36 @@ def simulate_neutron(x0, y0, z0, energy0):
 
     return (final_x, final_y, final_z, final_reaction,
             fission_neutrons, n_history, history_x, history_y, history_z)
+
+
+@njit(cache=True)
+def simulate_batch_slim(n_neutrons, neutron_id_offset, total_source_pins):
+    results_final_x = np.empty(n_neutrons, dtype=np.float64)
+    results_final_y = np.empty(n_neutrons, dtype=np.float64)
+    results_final_z = np.empty(n_neutrons, dtype=np.float64)
+    results_reaction = np.empty(n_neutrons, dtype=np.int32)
+    results_fission_n = np.empty(n_neutrons, dtype=np.int32)
+    results_history_len = np.empty(n_neutrons, dtype=np.int32)
+
+    for i in prange(n_neutrons):
+        global_idx = neutron_id_offset + i
+        src_idx = global_idx % total_source_pins
+        x0, y0 = source_position_from_index(src_idx)
+        z0 = CORE_Z_MIN + np.random.random() * (CORE_Z_MAX - CORE_Z_MIN)
+        e0 = sample_fission_energy()
+
+        (fx, fy, fz, rx, fn, hl,
+         hx, hy, hz) = simulate_neutron(x0, y0, z0, e0)
+
+        results_final_x[i] = fx
+        results_final_y[i] = fy
+        results_final_z[i] = fz
+        results_reaction[i] = rx
+        results_fission_n[i] = fn
+        results_history_len[i] = hl
+
+    return (results_final_x, results_final_y, results_final_z,
+            results_reaction, results_fission_n, results_history_len)
 
 
 @njit(cache=True)

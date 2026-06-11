@@ -14,13 +14,16 @@ def main():
     parser.add_argument('-t', '--traced', type=int, default=10000,
                        help='路径追踪中子数 (默认: 10,000)')
     parser.add_argument('-w', '--workers', type=int, default=None,
-                       help='Dask worker 数量 (默认: CPU核数-1)')
+                       help='Worker / Thread 数量')
     parser.add_argument('-o', '--output', type=str, default='reactor_3d.html',
                        help='输出HTML文件名 (默认: reactor_3d.html)')
     parser.add_argument('--no-trace', action='store_true',
                        help='跳过中子路径追踪')
-    parser.add_argument('--batch-size', type=int, default=50000,
-                       help='Dask批大小 (默认: 50,000)')
+    parser.add_argument('--batch-size', type=int, default=None,
+                       help='批大小 (默认: 自适应)')
+    parser.add_argument('--mode', type=str, default='auto',
+                       choices=['auto', 'numba', 'dask'],
+                       help='并行模式: auto(自动)/numba(纯Numba多核)/dask(Dask流式) (默认: auto)')
     args = parser.parse_args()
 
     print("=" * 70)
@@ -34,30 +37,27 @@ def main():
 
     from nuclear_data import (get_energy_group, get_macro_xs, get_A,
                                sample_fission_energy)
-    from neutron_transport import simulate_neutron, simulate_batch
-    from geometry import get_material
+    from neutron_transport import simulate_neutron, simulate_batch_slim
+    from geometry import get_material, TOTAL_SOURCE_PINS, source_position_from_index
 
     get_energy_group(1.0)
     get_macro_xs(0, 0)
     get_A(0)
     sample_fission_energy()
     get_material(0.0, 0.0, 185.0)
+    source_position_from_index(0)
     simulate_neutron(0.0, 0.0, 185.0, 1e6)
-
-    src_x = np.array([0.0], dtype=np.float64)
-    src_y = np.array([0.0], dtype=np.float64)
-    src_e = np.array([1e6], dtype=np.float64)
-    simulate_batch(10, src_x, src_y, src_e)
+    simulate_batch_slim(16, 0, TOTAL_SOURCE_PINS)
 
     print(f"    JIT 编译完成: {time.time()-t0:.1f}s")
     print()
 
-    print(f"[2/4] 运行主蒙特卡洛模拟 ({args.neutrons:,} 中子)...")
+    print(f"[2/4] 运行主蒙特卡洛模拟 ({args.neutrons:,} 中子, 模式: {args.mode})...")
     t1 = time.time()
 
     from parallel_engine import run_simulation
     results = run_simulation(args.neutrons, n_workers=args.workers,
-                            batch_size=args.batch_size)
+                            batch_size=args.batch_size, mode=args.mode)
 
     print(f"    模拟完成: {time.time()-t1:.1f}s")
     print()
@@ -95,7 +95,7 @@ def main():
     print("=" * 70)
     print(f"  完成! 输出文件: {output_path}")
     print(f"  总耗时: {total_time:.1f}s")
-    print(f"  模拟中子: {args.neutrons:,}")
+    print(f"  模拟中子: {args.neutrons:,}  模式: {args.mode}")
     n_a = results.get('n_absorb', 0)
     n_f = results.get('n_fission', 0)
     n_l = results.get('n_leak', 0)

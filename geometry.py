@@ -27,6 +27,35 @@ GUIDE_TUBE_X = np.array([p[0] for p in GUIDE_TUBE_LIST], dtype=np.int64)
 GUIDE_TUBE_Y = np.array([p[1] for p in GUIDE_TUBE_LIST], dtype=np.int64)
 N_GUIDE_TUBES = len(GUIDE_TUBE_LIST)
 
+FUEL_PIN_MASK = np.ones((ASSEMBLY_SIZE, ASSEMBLY_SIZE), dtype=bool)
+for (gx, gy) in GUIDE_TUBE_LIST:
+    FUEL_PIN_MASK[gx, gy] = False
+FUEL_PIN_COORDS = np.argwhere(FUEL_PIN_MASK).astype(np.int64)
+N_FUEL_PINS_PER_ASSEMBLY = len(FUEL_PIN_COORDS)
+
+SOURCE_ASSEMBLY_RANGE = 3
+SOURCE_CENTER_AX = N_ASSEMBLIES_X // 2
+SOURCE_CENTER_AY = N_ASSEMBLIES_Y // 2
+
+SOURCE_ASSEMBLY_OFFSETS = []
+for dax in range(-(SOURCE_ASSEMBLY_RANGE // 2), SOURCE_ASSEMBLY_RANGE // 2 + 1):
+    for day in range(-(SOURCE_ASSEMBLY_RANGE // 2), SOURCE_ASSEMBLY_RANGE // 2 + 1):
+        ax = SOURCE_CENTER_AX + dax
+        ay = SOURCE_CENTER_AY + day
+        SOURCE_ASSEMBLY_OFFSETS.append((ax, ay))
+SOURCE_ASSEMBLY_OFFSETS = np.array(SOURCE_ASSEMBLY_OFFSETS, dtype=np.int64)
+N_SOURCE_ASSEMBLIES = len(SOURCE_ASSEMBLY_OFFSETS)
+TOTAL_SOURCE_PINS = N_SOURCE_ASSEMBLIES * N_FUEL_PINS_PER_ASSEMBLY
+
+
+@njit(cache=True)
+def source_position_from_index(idx):
+    ax, ay = SOURCE_ASSEMBLY_OFFSETS[idx // N_FUEL_PINS_PER_ASSEMBLY]
+    pi, pj = FUEL_PIN_COORDS[idx % N_FUEL_PINS_PER_ASSEMBLY]
+    x = CORE_X_MIN + (ax * ASSEMBLY_SIZE + pi + 0.5) * PITCH
+    y = CORE_Y_MIN + (ay * ASSEMBLY_SIZE + pj + 0.5) * PITCH
+    return x, y
+
 
 def build_material_map(resolution_xy=2.0, resolution_z=10.0):
     nx = int((CORE_X_MAX - CORE_X_MIN) / resolution_xy)
